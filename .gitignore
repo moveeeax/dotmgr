@@ -1,0 +1,8 @@
+# Local scratch and editor noise.
+*.swp
+*~
+.DS_Store
+
+# Test artefacts.
+/tmp/
+*.log
