@@ -93,3 +93,39 @@ dm_rel_to_target() {
     *) basename "$path" ;;
   esac
 }
+
+# dm_trim STRING - strip leading and trailing whitespace.
+dm_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+# dm_parse_manifest FILE - emit normalised "SRC<TAB>DEST" rows.
+#
+# Manifest lines are one of:
+#   src -> dest    explicit mapping
+#   path           shorthand for "path -> path"
+# Blank lines and lines whose first non-space character is '#' are ignored.
+dm_parse_manifest() {
+  local file="$1" line src dest
+  [ -f "$file" ] || die "manifest not found: $file"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="$(dm_trim "$line")"
+    [ -z "$line" ] && continue
+    case "$line" in
+      \#*) continue ;;
+    esac
+    if [[ "$line" == *"->"* ]]; then
+      src="$(dm_trim "${line%%->*}")"
+      dest="$(dm_trim "${line#*->}")"
+    else
+      src="$line"
+      dest="$line"
+    fi
+    [ -n "$src" ] || die "manifest line has empty source: $line"
+    [ -n "$dest" ] || die "manifest line has empty destination: $line"
+    printf '%s\t%s\n' "$src" "$dest"
+  done < "$file"
+}
