@@ -75,11 +75,11 @@ dm_abs_src() {
 # A leading "/" is kept verbatim, a leading "~" expands against the target
 # directory, and anything else is treated as relative to the target.
 dm_expand_dest() {
-  local dest="$1"
+  local dest="$1" tilde='~'
   case "$dest" in
     /*) printf '%s\n' "$dest" ;;
-    "~") printf '%s\n' "${DOTMGR_TARGET%/}" ;;
-    "~/"*) printf '%s\n' "${DOTMGR_TARGET%/}/${dest#\~/}" ;;
+    "$tilde") printf '%s\n' "${DOTMGR_TARGET%/}" ;;
+    "$tilde"/*) printf '%s\n' "${DOTMGR_TARGET%/}/${dest:2}" ;;
     *) printf '%s\n' "${DOTMGR_TARGET%/}/$dest" ;;
   esac
 }
