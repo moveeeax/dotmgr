@@ -45,3 +45,51 @@ die() {
   printf '%s [ERROR] %s%s%s\n' "$(_dm_ts)" "$_DM_C_RED" "$*" "$_DM_C_RESET" >&2
   exit 1
 }
+
+# dm_dry_run - true when the caller asked for a dry run.
+dm_dry_run() {
+  [ "${DOTMGR_DRY_RUN:-0}" = "1" ]
+}
+
+# dm_do COMMAND... - run a mutating command, or log it under --dry-run.
+dm_do() {
+  if dm_dry_run; then
+    info "[dry-run] $*"
+    return 0
+  fi
+  "$@"
+}
+
+# dm_timestamp - a sortable stamp used to name backup snapshots.
+dm_timestamp() {
+  date +"%Y%m%d-%H%M%S"
+}
+
+# dm_abs_src SRC - absolute path of a manifest source inside the repo.
+dm_abs_src() {
+  printf '%s\n' "${DOTMGR_REPO%/}/$1"
+}
+
+# dm_expand_dest DEST - resolve a manifest destination to an absolute path.
+#
+# A leading "/" is kept verbatim, a leading "~" expands against the target
+# directory, and anything else is treated as relative to the target.
+dm_expand_dest() {
+  local dest="$1"
+  case "$dest" in
+    /*) printf '%s\n' "$dest" ;;
+    "~") printf '%s\n' "${DOTMGR_TARGET%/}" ;;
+    "~/"*) printf '%s\n' "${DOTMGR_TARGET%/}/${dest#\~/}" ;;
+    *) printf '%s\n' "${DOTMGR_TARGET%/}/$dest" ;;
+  esac
+}
+
+# dm_rel_to_target PATH - path relative to the target dir, or its basename
+# when the path lives outside the target. Used to lay out backups.
+dm_rel_to_target() {
+  local path="$1" base="${DOTMGR_TARGET%/}"
+  case "$path" in
+    "$base"/*) printf '%s\n' "${path#"$base"/}" ;;
+    *) basename "$path" ;;
+  esac
+}
