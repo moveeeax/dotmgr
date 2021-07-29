@@ -129,3 +129,53 @@ dm_parse_manifest() {
     printf '%s\t%s\n' "$src" "$dest"
   done < "$file"
 }
+
+# dm_is_linked DEST SRC - true when DEST is a symlink already pointing at SRC.
+dm_is_linked() {
+  local dest="$1" src="$2"
+  [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]
+}
+
+# dm_backup_into DEST RUNDIR - move an existing DEST into the backup run dir,
+# preserving its path relative to the target directory.
+dm_backup_into() {
+  local dest="$1" rundir="$2" rel bpath
+  rel="$(dm_rel_to_target "$dest")"
+  bpath="$rundir/$rel"
+  dm_do mkdir -p "$(dirname "$bpath")"
+  dm_do mv "$dest" "$bpath"
+  info "backed up: $dest -> $bpath"
+}
+
+# cmd_link - link every manifest entry into the target directory.
+#
+# Existing real files or foreign symlinks are moved into a single timestamped
+# backup run before the managed symlink is created. Entries that are already
+# correctly linked are left untouched, which makes re-running a no-op.
+cmd_link() {
+  [ -d "$DOTMGR_REPO" ] || die "repo directory not found: $DOTMGR_REPO"
+  local run_dir made_backup=0 src dest src_abs dest_abs
+  run_dir="${DOTMGR_BACKUP_DIR%/}/$(dm_timestamp)"
+  while IFS=$'\t' read -r src dest; do
+    src_abs="$(dm_abs_src "$src")"
+    dest_abs="$(dm_expand_dest "$dest")"
+    if [ ! -e "$src_abs" ] && [ ! -L "$src_abs" ]; then
+      warn "source missing in repo, skipping: $src"
+      continue
+    fi
+    if dm_is_linked "$dest_abs" "$src_abs"; then
+      info "ok: $dest already linked"
+      continue
+    fi
+    if [ -e "$dest_abs" ] || [ -L "$dest_abs" ]; then
+      if [ "$made_backup" -eq 0 ]; then
+        dm_do mkdir -p "$run_dir"
+        made_backup=1
+      fi
+      dm_backup_into "$dest_abs" "$run_dir"
+    fi
+    dm_do mkdir -p "$(dirname "$dest_abs")"
+    dm_do ln -s "$src_abs" "$dest_abs"
+    info "linked: $dest -> $src"
+  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+}
