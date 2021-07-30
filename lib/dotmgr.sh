@@ -179,3 +179,83 @@ cmd_link() {
     info "linked: $dest -> $src"
   done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
 }
+
+# dm_version - print the toolkit version from the VERSION file.
+dm_version() {
+  local dir
+  dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [ -f "$dir/VERSION" ]; then
+    cat "$dir/VERSION"
+  else
+    printf 'unknown\n'
+  fi
+}
+
+# dm_usage - print command-line help.
+dm_usage() {
+  cat <<'USAGE'
+Usage: dotmgr [GLOBAL OPTIONS] COMMAND [ARGS]
+
+Manage dotfiles by symlinking sources from a repository into a target
+directory (your $HOME by default), driven by a manifest.
+
+Commands:
+  link                 Create managed symlinks, backing up any conflicts
+  unlink [--restore]   Remove managed symlinks, optionally restoring a backup
+  status               Show link / missing / conflict state for each entry
+  backup               Snapshot the current target files
+  restore [SNAPSHOT]   Restore a snapshot (latest when none is given)
+  adopt PATH           Move an existing file into the repo and symlink it back
+
+Global options:
+  --repo DIR           Dotfiles repository (default: $DOTMGR_REPO or cwd)
+  --target DIR         Where to link files (default: $HOME)
+  --manifest FILE      Manifest path (default: <repo>/dotmgr.manifest)
+  --backup-dir DIR     Backup root (default: XDG data dir)
+  -n, --dry-run        Show actions without changing anything
+  -h, --help           Show this help and exit
+      --version        Print the version and exit
+USAGE
+}
+
+# dm_main ARGS - parse global options and dispatch to a command.
+dm_main() {
+  : "${DOTMGR_REPO:=$PWD}"
+  : "${DOTMGR_TARGET:=$HOME}"
+  : "${DOTMGR_BACKUP_DIR:=${XDG_DATA_HOME:-$HOME/.local/share}/dotmgr/backups}"
+  : "${DOTMGR_DRY_RUN:=0}"
+
+  local cmd=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo) DOTMGR_REPO="$2"; shift 2 ;;
+      --repo=*) DOTMGR_REPO="${1#*=}"; shift ;;
+      --target) DOTMGR_TARGET="$2"; shift 2 ;;
+      --target=*) DOTMGR_TARGET="${1#*=}"; shift ;;
+      --manifest) DOTMGR_MANIFEST="$2"; shift 2 ;;
+      --manifest=*) DOTMGR_MANIFEST="${1#*=}"; shift ;;
+      --backup-dir) DOTMGR_BACKUP_DIR="$2"; shift 2 ;;
+      --backup-dir=*) DOTMGR_BACKUP_DIR="${1#*=}"; shift ;;
+      -n|--dry-run) DOTMGR_DRY_RUN=1; shift ;;
+      -h|--help) dm_usage; return 0 ;;
+      --version) dm_version; return 0 ;;
+      --) shift; break ;;
+      -*) dm_usage >&2; die "unknown option: $1" ;;
+      *) cmd="$1"; shift; break ;;
+    esac
+  done
+
+  [ -n "$cmd" ] || { dm_usage >&2; die "no command given"; }
+  : "${DOTMGR_MANIFEST:=${DOTMGR_REPO%/}/dotmgr.manifest}"
+
+  case "$cmd" in
+    link) cmd_link "$@" ;;
+    unlink) cmd_unlink "$@" ;;
+    status) cmd_status "$@" ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
+    adopt) cmd_adopt "$@" ;;
+    help) dm_usage ;;
+    *) dm_usage >&2; die "unknown command: $cmd" ;;
+  esac
+}

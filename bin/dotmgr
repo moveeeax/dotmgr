@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#
+# dotmgr - manage dotfiles by symlinking a repository into a target directory.
+#
+set -euo pipefail
+
+_DOTMGR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/dotmgr.sh
+source "${_DOTMGR_DIR}/../lib/dotmgr.sh"
+
+dm_main "$@"
