@@ -259,3 +259,27 @@ dm_main() {
     *) dm_usage >&2; die "unknown command: $cmd" ;;
   esac
 }
+
+# dm_classify SRC_ABS DEST_ABS - echo the state of a single managed entry:
+# "linked", "missing" or "conflict".
+dm_classify() {
+  local src_abs="$1" dest_abs="$2"
+  if dm_is_linked "$dest_abs" "$src_abs"; then
+    printf 'linked\n'
+  elif [ -e "$dest_abs" ] || [ -L "$dest_abs" ]; then
+    printf 'conflict\n'
+  else
+    printf 'missing\n'
+  fi
+}
+
+# cmd_status - print the state of every manifest entry to stdout.
+cmd_status() {
+  local src dest src_abs dest_abs state
+  while IFS=$'\t' read -r src dest; do
+    src_abs="$(dm_abs_src "$src")"
+    dest_abs="$(dm_expand_dest "$dest")"
+    state="$(dm_classify "$src_abs" "$dest_abs")"
+    printf '%-9s %s -> %s\n' "$state" "$dest" "$src"
+  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+}
