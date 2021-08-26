@@ -283,3 +283,62 @@ cmd_status() {
     printf '%-9s %s -> %s\n' "$state" "$dest" "$src"
   done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
 }
+
+# dm_latest_snapshot - print the newest snapshot directory under the backup
+# root, or return non-zero when there are none. Snapshot names are timestamps,
+# so lexical order matches chronological order.
+dm_latest_snapshot() {
+  [ -d "$DOTMGR_BACKUP_DIR" ] || return 1
+  local d newest=""
+  for d in "$DOTMGR_BACKUP_DIR"/*/; do
+    [ -d "$d" ] || continue
+    newest="$d"
+  done
+  [ -n "$newest" ] || return 1
+  printf '%s\n' "${newest%/}"
+}
+
+# dm_restore_from SNAPDIR - move every file and symlink from a snapshot back
+# to its original location under the target directory.
+dm_restore_from() {
+  local snap="${1%/}" f rel dest
+  [ -d "$snap" ] || die "snapshot not found: $snap"
+  while IFS= read -r -d '' f; do
+    rel="${f#"$snap"/}"
+    dest="${DOTMGR_TARGET%/}/$rel"
+    dm_do mkdir -p "$(dirname "$dest")"
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+      dm_do rm -rf "$dest"
+    fi
+    dm_do mv "$f" "$dest"
+    info "restored: $rel"
+  done < <(find "$snap" -mindepth 1 \( -type f -o -type l \) -print0)
+}
+
+# cmd_unlink [--restore] - remove managed symlinks. With --restore, the latest
+# backup snapshot is restored afterwards.
+cmd_unlink() {
+  local do_restore=0 src dest src_abs dest_abs
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --restore) do_restore=1; shift ;;
+      -*) die "unknown unlink option: $1" ;;
+      *) die "unlink takes no positional arguments" ;;
+    esac
+  done
+  while IFS=$'\t' read -r src dest; do
+    src_abs="$(dm_abs_src "$src")"
+    dest_abs="$(dm_expand_dest "$dest")"
+    if dm_is_linked "$dest_abs" "$src_abs"; then
+      dm_do rm "$dest_abs"
+      info "unlinked: $dest"
+    else
+      info "not managed, leaving in place: $dest"
+    fi
+  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  if [ "$do_restore" -eq 1 ]; then
+    local snap
+    snap="$(dm_latest_snapshot)" || die "no backups to restore"
+    dm_restore_from "$snap"
+  fi
+}
