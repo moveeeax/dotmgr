@@ -342,3 +342,45 @@ cmd_unlink() {
     dm_restore_from "$snap"
   fi
 }
+
+# cmd_backup - copy the current target files for every manifest entry into a
+# fresh timestamped snapshot. Symlinks are preserved as symlinks.
+cmd_backup() {
+  local snap made=0 src dest dest_abs rel bpath
+  snap="${DOTMGR_BACKUP_DIR%/}/$(dm_timestamp)"
+  while IFS=$'\t' read -r src dest; do
+    dest_abs="$(dm_expand_dest "$dest")"
+    if [ ! -e "$dest_abs" ] && [ ! -L "$dest_abs" ]; then
+      continue
+    fi
+    if [ "$made" -eq 0 ]; then
+      dm_do mkdir -p "$snap"
+      made=1
+    fi
+    rel="$(dm_rel_to_target "$dest_abs")"
+    bpath="$snap/$rel"
+    dm_do mkdir -p "$(dirname "$bpath")"
+    dm_do cp -a "$dest_abs" "$bpath"
+    info "snapshot: $rel"
+  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  if [ "$made" -eq 0 ]; then
+    warn "nothing to snapshot"
+  else
+    info "snapshot written to $snap"
+  fi
+}
+
+# cmd_restore [SNAPSHOT] - restore a snapshot. With no argument the latest is
+# used; a bare name is resolved under the backup root, and an absolute or
+# existing path is used as given.
+cmd_restore() {
+  local arg="${1:-}" snap
+  if [ -z "$arg" ]; then
+    snap="$(dm_latest_snapshot)" || die "no backups to restore"
+  elif [ -d "$arg" ]; then
+    snap="$arg"
+  else
+    snap="${DOTMGR_BACKUP_DIR%/}/$arg"
+  fi
+  dm_restore_from "$snap"
+}
