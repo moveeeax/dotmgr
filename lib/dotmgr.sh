@@ -384,3 +384,49 @@ cmd_restore() {
   fi
   dm_restore_from "$snap"
 }
+
+# dm_append_manifest SRC DEST - append a mapping line to the manifest.
+dm_append_manifest() {
+  printf '%s -> %s\n' "$1" "$2" >> "$DOTMGR_MANIFEST"
+}
+
+# dm_manifest_has SRC - true when the manifest already lists SRC as a source.
+dm_manifest_has() {
+  local want="$1" src dest
+  [ -f "$DOTMGR_MANIFEST" ] || return 1
+  while IFS=$'\t' read -r src dest; do
+    [ "$src" = "$want" ] && return 0
+  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  return 1
+}
+
+# cmd_adopt PATH - move an existing real file at PATH into the repo at the
+# matching relative location, replace it with a symlink, and record it in the
+# manifest if it is not already listed.
+cmd_adopt() {
+  [ $# -eq 1 ] || die "adopt requires exactly one PATH"
+  [ -d "$DOTMGR_REPO" ] || die "repo directory not found: $DOTMGR_REPO"
+  local dest_abs rel src_abs
+  dest_abs="$(dm_expand_dest "$1")"
+  if [ -L "$dest_abs" ]; then
+    die "already a symlink, nothing to adopt: $dest_abs"
+  fi
+  if [ ! -e "$dest_abs" ]; then
+    die "no such file to adopt: $dest_abs"
+  fi
+  rel="$(dm_rel_to_target "$dest_abs")"
+  src_abs="$(dm_abs_src "$rel")"
+  if [ -e "$src_abs" ] || [ -L "$src_abs" ]; then
+    die "repo already has a file at: $src_abs"
+  fi
+  dm_do mkdir -p "$(dirname "$src_abs")"
+  dm_do mv "$dest_abs" "$src_abs"
+  dm_do ln -s "$src_abs" "$dest_abs"
+  info "adopted: $rel"
+  if dm_manifest_has "$rel"; then
+    info "manifest already lists: $rel"
+  else
+    dm_do dm_append_manifest "$rel" "$rel"
+    info "added to manifest: $rel -> $rel"
+  fi
+}
