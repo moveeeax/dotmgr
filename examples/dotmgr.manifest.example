@@ -1,0 +1,13 @@
+# Example dotmgr manifest.
+#
+# Copy this to the root of your dotfiles repository as "dotmgr.manifest"
+# and adjust the entries. Lines are "src -> dest" or the "path" shorthand.
+
+# Shorthand: linked to the same relative path under $HOME.
+.bashrc
+.gitconfig
+.tmux.conf
+
+# Explicit mappings for files that live at a different path in the repo.
+nvim/init.vim -> .config/nvim/init.vim
+git/ignore    -> .config/git/ignore
