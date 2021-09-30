@@ -60,6 +60,11 @@ dm_do() {
   "$@"
 }
 
+# dm_require_repo - abort unless the configured repository directory exists.
+dm_require_repo() {
+  [ -d "$DOTMGR_REPO" ] || die "repo directory not found: $DOTMGR_REPO"
+}
+
 # dm_timestamp - a sortable stamp used to name backup snapshots.
 dm_timestamp() {
   date +"%Y%m%d-%H%M%S"
@@ -153,7 +158,7 @@ dm_backup_into() {
 # backup run before the managed symlink is created. Entries that are already
 # correctly linked are left untouched, which makes re-running a no-op.
 cmd_link() {
-  [ -d "$DOTMGR_REPO" ] || die "repo directory not found: $DOTMGR_REPO"
+  dm_require_repo
   local run_dir made_backup=0 src dest src_abs dest_abs
   run_dir="${DOTMGR_BACKUP_DIR%/}/$(dm_timestamp)"
   while IFS=$'\t' read -r src dest; do
@@ -405,7 +410,7 @@ dm_manifest_has() {
 # manifest if it is not already listed.
 cmd_adopt() {
   [ $# -eq 1 ] || die "adopt requires exactly one PATH"
-  [ -d "$DOTMGR_REPO" ] || die "repo directory not found: $DOTMGR_REPO"
+  dm_require_repo
   local dest_abs rel src_abs
   dest_abs="$(dm_expand_dest "$1")"
   if [ -L "$dest_abs" ]; then
