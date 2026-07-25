@@ -57,6 +57,28 @@ teardown() { teardown_env; }
   [[ "$output" == *"no such file"* ]]
 }
 
+# Regression: outside the target the repo-relative path collapsed to a bare
+# basename, so adopt wrote a manifest entry pointing at $TARGET/<basename>
+# while the symlink it created sat somewhere else entirely.
+@test "adopt refuses a path outside the target directory" {
+  mkdir -p "$TMP/elsewhere"
+  printf 'OUTSIDE\n' > "$TMP/elsewhere/conf"
+  : > "$DOTMGR_MANIFEST"
+  run cmd_adopt "$TMP/elsewhere/conf"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"only handles paths under the target directory"* ]]
+  [ ! -L "$TMP/elsewhere/conf" ]
+  [ "$(cat "$TMP/elsewhere/conf")" = "OUTSIDE" ]
+  [ ! -s "$DOTMGR_MANIFEST" ]
+}
+
+@test "adopt refuses a path that traverses out of the target" {
+  : > "$DOTMGR_MANIFEST"
+  run cmd_adopt "../escape/conf"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must not contain a '..'"* ]]
+}
+
 @test "dry-run adopt leaves the original file in place" {
   mktarget_file ".bashrc" "keep"
   : > "$DOTMGR_MANIFEST"

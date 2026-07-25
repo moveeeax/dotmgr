@@ -54,7 +54,23 @@ teardown() { teardown_env; }
   [ "$output" = ".config/nvim/init.vim" ]
 }
 
-@test "dm_rel_to_target falls back to basename outside the target" {
+@test "dm_rel_to_target keeps the full path for absolute paths outside the target" {
   run dm_rel_to_target "/opt/thing/file.conf"
-  [ "$output" = "file.conf" ]
+  [ "$output" = "_dotmgr_abs/opt/thing/file.conf" ]
+}
+
+@test "dm_rel_to_target keeps outside-target paths distinct when basenames match" {
+  a="$(dm_rel_to_target "/opt/a/conf")"
+  b="$(dm_rel_to_target "/opt/b/conf")"
+  [ "$a" != "$b" ]
+}
+
+@test "dm_reject_traversal rejects a .. component but allows dots in names" {
+  run dm_reject_traversal "manifest destination" "../../etc/passwd"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must not contain a '..'"* ]]
+  run dm_reject_traversal "manifest destination" "a/../b"
+  [ "$status" -ne 0 ]
+  run dm_reject_traversal "manifest destination" ".config/my..app/file"
+  [ "$status" -eq 0 ]
 }

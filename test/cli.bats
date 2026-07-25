@@ -44,6 +44,32 @@ teardown() { teardown_env; }
   [[ "$output" == *"missing"* ]]
 }
 
+@test "dm_main rejects an empty target directory" {
+  run dm_main --target "" status
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"target directory must not be empty"* ]]
+}
+
+@test "dm_main rejects the filesystem root as the target" {
+  run dm_main --target / status
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must not be the filesystem root"* ]]
+}
+
+@test "dm_main rejects an empty repo or backup directory" {
+  run dm_main --repo "" status
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repo directory must not be empty"* ]]
+  run dm_main --backup-dir "" link
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"backup directory must not be empty"* ]]
+}
+
+@test "dm_main propagates a manifest failure as a non-zero exit" {
+  run dm_main --manifest "$TMP/absent.manifest" link
+  [ "$status" -ne 0 ]
+}
+
 @test "dm_main link then status shows linked end to end" {
   mkrepo_file ".bashrc"
   write_manifest ".bashrc -> .bashrc"

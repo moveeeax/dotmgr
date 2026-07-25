@@ -84,6 +84,23 @@ teardown() { teardown_env; }
   [ -L "$DOTMGR_TARGET/.gitconfig" ]
 }
 
+# Regression: with the repo inside the target, an entry whose source and
+# destination resolve to the same path used to move the only real copy into a
+# backup and leave a self-referential symlink that status then called "linked".
+@test "link refuses an entry that maps a path onto itself" {
+  export DOTMGR_REPO="$DOTMGR_TARGET/dotfiles"
+  export DOTMGR_MANIFEST="$DOTMGR_REPO/dotmgr.manifest"
+  mkdir -p "$DOTMGR_REPO"
+  printf 'MY-REAL-BASHRC\n' > "$DOTMGR_REPO/.bashrc"
+  write_manifest ".bashrc -> dotfiles/.bashrc"
+  run cmd_link
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"maps a path onto itself"* ]]
+  # The real file is still a readable regular file, not a symlink to itself.
+  [ ! -L "$DOTMGR_REPO/.bashrc" ]
+  [ "$(cat "$DOTMGR_REPO/.bashrc")" = "MY-REAL-BASHRC" ]
+}
+
 @test "dry-run link makes no changes on disk" {
   mkrepo_file ".bashrc"
   mktarget_file ".bashrc" "keep-me"
