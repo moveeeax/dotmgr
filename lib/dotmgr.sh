@@ -89,13 +89,34 @@ dm_expand_dest() {
   esac
 }
 
-# dm_rel_to_target PATH - path relative to the target dir, or its basename
-# when the path lives outside the target. Used to lay out backups.
+# Snapshot subdirectory holding destinations that live outside the target
+# directory. Kept deliberately unlikely to collide with a real dotfile name.
+_DM_ABS_PREFIX="_dotmgr_abs"
+
+# dm_rel_to_target PATH - the snapshot-relative location used to store PATH.
+#
+# Paths under the target directory keep their relative layout. An absolute
+# path outside the target is stored under "$_DM_ABS_PREFIX/" with its full
+# path preserved, so that two entries sharing a basename cannot overwrite each
+# other in a snapshot and so that dm_restore_from can put the file back where
+# it actually came from.
 dm_rel_to_target() {
   local path="$1" base="${DOTMGR_TARGET%/}"
   case "$path" in
     "$base"/*) printf '%s\n' "${path#"$base"/}" ;;
+    /*) printf '%s\n' "$_DM_ABS_PREFIX/${path#/}" ;;
     *) basename "$path" ;;
+  esac
+}
+
+# dm_reject_traversal LABEL PATH - abort when PATH has a ".." component.
+#
+# Without this a manifest entry such as "x -> ../../.ssh/authorized_keys"
+# resolves outside the target directory. Absolute destinations are still
+# supported and are the intended way to manage files elsewhere.
+dm_reject_traversal() {
+  case "/$2/" in
+    */../*) die "$1 must not contain a '..' path component: $2" ;;
   esac
 }
 
@@ -131,8 +152,22 @@ dm_parse_manifest() {
     fi
     [ -n "$src" ] || die "manifest line has empty source: $line"
     [ -n "$dest" ] || die "manifest line has empty destination: $line"
+    dm_reject_traversal "manifest source" "$src"
+    dm_reject_traversal "manifest destination" "$dest"
     printf '%s\t%s\n' "$src" "$dest"
   done < "$file"
+}
+
+# dm_load_manifest - parse DOTMGR_MANIFEST into the DM_MANIFEST_ROWS global.
+#
+# dm_parse_manifest reports fatal problems with die(), and die() runs `exit`
+# in whichever shell it happens to be in. Read as `< <(dm_parse_manifest ...)`
+# that shell is only the process-substitution subshell, so every command
+# silently carried on with an empty entry list and still returned success --
+# `dotmgr link` against a mistyped manifest path exited 0 having done nothing.
+# A checked command substitution puts that failure back in the caller's hands.
+dm_load_manifest() {
+  DM_MANIFEST_ROWS="$(dm_parse_manifest "$DOTMGR_MANIFEST")" || return 1
 }
 
 # dm_is_linked DEST SRC - true when DEST is a symlink already pointing at SRC.
@@ -161,9 +196,17 @@ cmd_link() {
   dm_require_repo
   local run_dir made_backup=0 src dest src_abs dest_abs
   run_dir="${DOTMGR_BACKUP_DIR%/}/$(dm_timestamp)"
+  dm_load_manifest || return 1
   while IFS=$'\t' read -r src dest; do
+    [ -n "$src" ] || continue
     src_abs="$(dm_abs_src "$src")"
     dest_abs="$(dm_expand_dest "$dest")"
+    # Linking a path to itself moves the only real copy into a backup and
+    # leaves a self-referential symlink behind, which later runs then report
+    # as "linked". Refuse instead of destroying the file.
+    if [ "$src_abs" = "$dest_abs" ]; then
+      die "manifest entry maps a path onto itself, refusing to link: $src -> $dest (both resolve to $src_abs)"
+    fi
     if [ ! -e "$src_abs" ] && [ ! -L "$src_abs" ]; then
       warn "source missing in repo, skipping: $src"
       continue
@@ -182,7 +225,7 @@ cmd_link() {
     dm_do mkdir -p "$(dirname "$dest_abs")"
     dm_do ln -s "$src_abs" "$dest_abs"
     info "linked: $dest -> $src"
-  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  done <<< "$DM_MANIFEST_ROWS"
 }
 
 # dm_version - print the toolkit version from the VERSION file.
@@ -251,7 +294,18 @@ dm_main() {
   done
 
   [ -n "$cmd" ] || { dm_usage >&2; die "no command given"; }
+
+  # These directories are the base of every path this tool creates, moves and
+  # removes. An empty value (an unset or blank $HOME, an option given an empty
+  # argument) would silently retarget all of that at the filesystem root, so
+  # refuse rather than trust the environment.
+  [ -n "$DOTMGR_REPO" ] || die "repo directory must not be empty"
+  [ -n "$DOTMGR_TARGET" ] || die "target directory must not be empty"
+  [ -n "$DOTMGR_BACKUP_DIR" ] || die "backup directory must not be empty"
+  [ -n "${DOTMGR_TARGET%/}" ] || die "target directory must not be the filesystem root"
+
   : "${DOTMGR_MANIFEST:=${DOTMGR_REPO%/}/dotmgr.manifest}"
+  [ -n "$DOTMGR_MANIFEST" ] || die "manifest path must not be empty"
 
   case "$cmd" in
     link) cmd_link "$@" ;;
@@ -281,12 +335,14 @@ dm_classify() {
 # cmd_status - print the state of every manifest entry to stdout.
 cmd_status() {
   local src dest src_abs dest_abs state
+  dm_load_manifest || return 1
   while IFS=$'\t' read -r src dest; do
+    [ -n "$src" ] || continue
     src_abs="$(dm_abs_src "$src")"
     dest_abs="$(dm_expand_dest "$dest")"
     state="$(dm_classify "$src_abs" "$dest_abs")"
     printf '%-9s %s -> %s\n' "$state" "$dest" "$src"
-  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  done <<< "$DM_MANIFEST_ROWS"
 }
 
 # dm_latest_snapshot - print the newest snapshot directory under the backup
@@ -310,13 +366,21 @@ dm_restore_from() {
   [ -d "$snap" ] || die "snapshot not found: $snap"
   while IFS= read -r -d '' f; do
     rel="${f#"$snap"/}"
-    dest="${DOTMGR_TARGET%/}/$rel"
+    case "$rel" in
+      "$_DM_ABS_PREFIX"/*) dest="/${rel#"$_DM_ABS_PREFIX"/}" ;;
+      *) dest="${DOTMGR_TARGET%/}/$rel" ;;
+    esac
+    # Last line of defence: an empty or root destination here would hand the
+    # filesystem root to rm -rf.
+    case "$dest" in
+      "" | "/") die "refusing to restore to unsafe path: '$dest'" ;;
+    esac
     dm_do mkdir -p "$(dirname "$dest")"
     if [ -e "$dest" ] || [ -L "$dest" ]; then
       dm_do rm -rf "$dest"
     fi
     dm_do mv "$f" "$dest"
-    info "restored: $rel"
+    info "restored: $dest"
   done < <(find "$snap" -mindepth 1 \( -type f -o -type l \) -print0)
 }
 
@@ -331,7 +395,9 @@ cmd_unlink() {
       *) die "unlink takes no positional arguments" ;;
     esac
   done
+  dm_load_manifest || return 1
   while IFS=$'\t' read -r src dest; do
+    [ -n "$src" ] || continue
     src_abs="$(dm_abs_src "$src")"
     dest_abs="$(dm_expand_dest "$dest")"
     if dm_is_linked "$dest_abs" "$src_abs"; then
@@ -340,7 +406,7 @@ cmd_unlink() {
     else
       info "not managed, leaving in place: $dest"
     fi
-  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  done <<< "$DM_MANIFEST_ROWS"
   if [ "$do_restore" -eq 1 ]; then
     local snap
     snap="$(dm_latest_snapshot)" || die "no backups to restore"
@@ -353,7 +419,9 @@ cmd_unlink() {
 cmd_backup() {
   local snap made=0 src dest dest_abs rel bpath
   snap="${DOTMGR_BACKUP_DIR%/}/$(dm_timestamp)"
+  dm_load_manifest || return 1
   while IFS=$'\t' read -r src dest; do
+    [ -n "$src" ] || continue
     dest_abs="$(dm_expand_dest "$dest")"
     if [ ! -e "$dest_abs" ] && [ ! -L "$dest_abs" ]; then
       continue
@@ -367,7 +435,7 @@ cmd_backup() {
     dm_do mkdir -p "$(dirname "$bpath")"
     dm_do cp -a "$dest_abs" "$bpath"
     info "snapshot: $rel"
-  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  done <<< "$DM_MANIFEST_ROWS"
   if [ "$made" -eq 0 ]; then
     warn "nothing to snapshot"
   else
@@ -399,9 +467,10 @@ dm_append_manifest() {
 dm_manifest_has() {
   local want="$1" src dest
   [ -f "$DOTMGR_MANIFEST" ] || return 1
+  dm_load_manifest || return 1
   while IFS=$'\t' read -r src dest; do
     [ "$src" = "$want" ] && return 0
-  done < <(dm_parse_manifest "$DOTMGR_MANIFEST")
+  done <<< "$DM_MANIFEST_ROWS"
   return 1
 }
 
@@ -411,8 +480,17 @@ dm_manifest_has() {
 cmd_adopt() {
   [ $# -eq 1 ] || die "adopt requires exactly one PATH"
   dm_require_repo
-  local dest_abs rel src_abs
+  local dest_abs rel src_abs base="${DOTMGR_TARGET%/}"
+  dm_reject_traversal "adopt path" "$1"
   dest_abs="$(dm_expand_dest "$1")"
+  # Outside the target directory the repo-relative location collapses to a
+  # basename, so the manifest entry it writes points somewhere else entirely:
+  # link/status/unlink would all act on $TARGET/<basename> while the real
+  # symlink sat at the original path, permanently orphaned.
+  case "$dest_abs" in
+    "$base"/*) ;;
+    *) die "adopt only handles paths under the target directory ($base): $dest_abs" ;;
+  esac
   if [ -L "$dest_abs" ]; then
     die "already a symlink, nothing to adopt: $dest_abs"
   fi

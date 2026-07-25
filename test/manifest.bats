@@ -49,3 +49,40 @@ teardown() { teardown_env; }
   [ "$status" -ne 0 ]
   [[ "$output" == *"manifest not found"* ]]
 }
+
+@test "dm_parse_manifest rejects a destination that escapes the target" {
+  write_manifest "evil -> ../../.ssh/authorized_keys"
+  run dm_parse_manifest "$DOTMGR_MANIFEST"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must not contain a '..'"* ]]
+}
+
+@test "dm_parse_manifest rejects a source that escapes the repo" {
+  write_manifest "../../etc/shadow -> .shadow"
+  run dm_parse_manifest "$DOTMGR_MANIFEST"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must not contain a '..'"* ]]
+}
+
+# Regression: die() inside `< <(dm_parse_manifest ...)` only exited the
+# process-substitution subshell, so every command reported success on a
+# manifest it had never actually read.
+@test "commands fail loudly when the manifest cannot be parsed" {
+  export DOTMGR_MANIFEST="$TMP/absent.manifest"
+  run cmd_link
+  [ "$status" -ne 0 ]
+  run cmd_status
+  [ "$status" -ne 0 ]
+  run cmd_unlink
+  [ "$status" -ne 0 ]
+  run cmd_backup
+  [ "$status" -ne 0 ]
+}
+
+@test "commands fail on an invalid manifest without touching the target" {
+  mkrepo_file ".bashrc"
+  write_manifest ".bashrc -> .bashrc" "x -> ../escape"
+  run cmd_link
+  [ "$status" -ne 0 ]
+  [ ! -e "$DOTMGR_TARGET/.bashrc" ]
+}

@@ -40,6 +40,27 @@ nvim/init.vim -> .config/nvim/init.vim
 - The destination is resolved relative to the target directory (`--target`,
   your `$HOME` by default). A leading `/` is treated as an absolute path and a
   leading `~/` expands against the target.
+- Neither side may contain a `..` component; use an absolute destination if you
+  need to manage a file outside the target directory.
+- An entry whose source and destination resolve to the *same* path is rejected,
+  since linking a file to itself would destroy it.
+
+## Safety rules
+
+`dotmgr` moves, replaces and deletes files, so it is deliberately strict:
+
+- A real file or foreign symlink at a destination is **moved into a timestamped
+  backup** before the managed symlink replaces it — nothing is clobbered.
+- Destinations outside the target directory are snapshotted under a
+  `_dotmgr_abs/` subdirectory that preserves their full path, so two entries
+  sharing a basename cannot overwrite each other and `restore` returns each
+  file to the location it actually came from.
+- `adopt` only accepts paths under the target directory. Adopting from outside
+  it cannot produce a manifest entry that round-trips.
+- An empty `--repo`/`--target`/`--backup-dir`, or `--target /`, is refused
+  rather than silently retargeting every operation at the filesystem root.
+- A manifest that cannot be read or parsed aborts the command with a non-zero
+  exit status; no command proceeds against a partially understood manifest.
 
 ## Commands
 
