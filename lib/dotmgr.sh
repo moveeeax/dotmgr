@@ -304,6 +304,29 @@ dm_main() {
   [ -n "$DOTMGR_BACKUP_DIR" ] || die "backup directory must not be empty"
   [ -n "${DOTMGR_TARGET%/}" ] || die "target directory must not be the filesystem root"
 
+  # Anchor a relative --repo/--target/--backup-dir to the invocation cwd.
+  #
+  # DOTMGR_REPO in particular becomes literal symlink target text in
+  # dm_abs_src: `ln -s "$src_abs" "$dest_abs"`. Left relative, the symlink is
+  # resolved by the kernel against the *symlink's own directory*, not the cwd
+  # dotmgr was run from. `dotmgr --repo dotfiles link` run from anywhere other
+  # than the target directory silently produced dangling links pointing at
+  # "dotfiles/..." under $HOME instead of the intended checkout. Target and
+  # backup-dir are normalised too so every path this tool prints or records
+  # stays meaningful after the process's cwd is no longer available.
+  case "$DOTMGR_REPO" in
+    /*) ;;
+    *) DOTMGR_REPO="$PWD/$DOTMGR_REPO" ;;
+  esac
+  case "$DOTMGR_TARGET" in
+    /*) ;;
+    *) DOTMGR_TARGET="$PWD/$DOTMGR_TARGET" ;;
+  esac
+  case "$DOTMGR_BACKUP_DIR" in
+    /*) ;;
+    *) DOTMGR_BACKUP_DIR="$PWD/$DOTMGR_BACKUP_DIR" ;;
+  esac
+
   : "${DOTMGR_MANIFEST:=${DOTMGR_REPO%/}/dotmgr.manifest}"
   [ -n "$DOTMGR_MANIFEST" ] || die "manifest path must not be empty"
 

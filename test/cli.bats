@@ -78,3 +78,22 @@ teardown() { teardown_env; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"linked"* ]]
 }
+
+# Regression: DOTMGR_REPO is embedded as literal symlink target text (see
+# dm_abs_src). Left relative, `ln -s` resolves it against the symlink's own
+# directory rather than the cwd dotmgr was invoked from, so a relative --repo
+# produced a symlink that looked fine (`status` reported "linked") but was
+# actually dangling whenever the target directory differed from cwd.
+@test "dm_main resolves a relative --repo against the invocation cwd" {
+  mkrepo_file ".bashrc" "from-repo"
+  write_manifest ".bashrc -> .bashrc"
+  ( cd "$TMP" && dm_main --repo "repo" --target "$DOTMGR_TARGET" \
+      --manifest "$DOTMGR_MANIFEST" --backup-dir "$DOTMGR_BACKUP_DIR" link )
+  [ -L "$DOTMGR_TARGET/.bashrc" ]
+  case "$(readlink "$DOTMGR_TARGET/.bashrc")" in
+    /*) ;;
+    *) echo "expected an absolute symlink target, got: $(readlink "$DOTMGR_TARGET/.bashrc")"; return 1 ;;
+  esac
+  # The link must actually resolve, not just look plausible.
+  [ "$(cat "$DOTMGR_TARGET/.bashrc")" = "from-repo" ]
+}
