@@ -1,0 +1,45 @@
+# Example dotmgr ssh inventory.
+#
+# Copy this to the root of your dotfiles repository as "ssh.inventory" and
+# render it with `dotmgr ssh --env staging` (or --env prod). Option lines are
+# ssh_config keywords, written "Key = value" or "Key value".
+
+# Applied to every host.
+[defaults]
+User = deploy
+ServerAliveInterval = 30
+
+# Bastions are declared once per environment, not once per host.
+[env staging]
+ProxyJump = bastion.staging.example.com
+
+[env prod]
+ProxyJump = jump1.prod.example.com,jump2.prod.example.com
+
+[group web]
+User = www
+IdentityFile = ~/.ssh/web_ed25519
+
+# Only under --env prod.
+[group web @prod]
+Port = 2222
+
+[host web1]
+groups = web
+HostName = 10.0.0.11
+
+[host web1 @staging]
+HostName = 10.1.0.11
+
+# Rendered only for the listed envs.
+[host db1]
+envs = prod
+HostName = 10.0.0.21
+
+[host bastion.staging.example.com]
+envs = staging
+ProxyJump = none
+
+# Emitted verbatim as "Match host *.internal.example.com".
+[match host *.internal.example.com]
+StrictHostKeyChecking = yes
