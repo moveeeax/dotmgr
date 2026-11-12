@@ -40,7 +40,7 @@ teardown() { teardown_env; }
   write_manifest ".bashrc -> .bashrc"
   run dm_main --repo "$DOTMGR_REPO" --target "$DOTMGR_TARGET" \
     --manifest "$DOTMGR_MANIFEST" status
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"missing"* ]]
 }
 
@@ -96,4 +96,19 @@ teardown() { teardown_env; }
   esac
   # The link must actually resolve, not just look plausible.
   [ "$(cat "$DOTMGR_TARGET/.bashrc")" = "from-repo" ]
+}
+
+@test "bin/dotmgr status exit codes reach the calling shell" {
+  mkrepo_file ".bashrc"
+  write_manifest ".bashrc -> .bashrc"
+  run "$REPO_ROOT/bin/dotmgr" --repo "$DOTMGR_REPO" --target "$DOTMGR_TARGET" status
+  [ "$status" -eq 1 ]
+  "$REPO_ROOT/bin/dotmgr" --repo "$DOTMGR_REPO" --target "$DOTMGR_TARGET" \
+    --backup-dir "$DOTMGR_BACKUP_DIR" link 2>/dev/null
+  run "$REPO_ROOT/bin/dotmgr" --repo "$DOTMGR_REPO" --target "$DOTMGR_TARGET" status --porcelain
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'linked\t.bashrc\t.bashrc')" ]
+  run "$REPO_ROOT/bin/dotmgr" --repo "$DOTMGR_REPO" --target "$DOTMGR_TARGET" \
+    --manifest "$TMP/absent.manifest" status
+  [ "$status" -eq 2 ]
 }
